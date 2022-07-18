@@ -5,11 +5,11 @@
 #include <cheat/game/EntityManager.h>
 #include <cheat/game/util.h>
 #include <cheat/game/filters.h>
+#include <cheat/events.h>
 
 namespace cheat::feature 
 {
-	static void LCBaseCombat_DoHitEntity_Hook(app::LCBaseCombat* __this, uint32_t targetID, app::AttackResult* attackResult,
-		bool ignoreCheckCanBeHitInMP, MethodInfo* method);
+	std::queue<std::tuple<app::LCBaseCombat*, uint32_t, app::AttackResult*, bool, MethodInfo*, uint32_t>> RapidFire::attackQueue;
 
     RapidFire::RapidFire() : Feature(),
         NF(f_Enabled,			"Attack Multiplier",	"RapidFire", false),
@@ -23,6 +23,7 @@ namespace cheat::feature
 		NF(f_MultiTargetRadius, "Multi-target Radius",	"RapidFire", 20.0f)
     {
 		HookManager::install(app::MoleMole_LCBaseCombat_DoHitEntity, LCBaseCombat_DoHitEntity_Hook);
+		events::GameUpdateEvent += MY_METHOD_HANDLER(RapidFire::OnGameUpdate);
     }
 
     const FeatureGUIInfo& RapidFire::GetGUIInfo() const
@@ -145,11 +146,10 @@ namespace cheat::feature
 				attackResult, manager.avatar()->raw(), targetEntity->raw(), nullptr);
 			countOfAttacks = CalcCountToKill(attackResult->fields.damage, targetID);
 		}
-		if (f_Randomize)
-		{
+		else if (f_maxMultiplier.value() == f_minMultiplier.value())
+			countOfAttacks = f_maxMultiplier.value();
+		else if (f_Randomize)
 			countOfAttacks = rand() % (f_maxMultiplier.value() - f_minMultiplier.value()) + f_minMultiplier.value();
-			return countOfAttacks;
-		}
 
 		return countOfAttacks;
 	}
@@ -194,11 +194,27 @@ namespace cheat::feature
 		return false;
 	}
 
+	void RapidFire::OnGameUpdate()
+	{
+		if (!attackQueue.empty())
+		{
+			auto& [arg0, arg1, arg2, arg3, arg4, count] = attackQueue.front();
+			LOG_DEBUG("Attacking x%u", count);
+			CALL_ORIGIN(LCBaseCombat_DoHitEntity_Hook, arg0, arg1, arg2, arg3, arg4);
+			if (!--count)
+				attackQueue.pop();
+			LOG_DEBUG("\n");
+		}
+	}
+
 	// Raises when any entity do hit event.
 	// Just recall attack few times (regulating by combatProp)
 	// It's not tested well, so, I think, anticheat can detect it.
-	static void LCBaseCombat_DoHitEntity_Hook(app::LCBaseCombat* __this, uint32_t targetID, app::AttackResult* attackResult,
-		bool ignoreCheckCanBeHitInMP, MethodInfo* method)
+    void RapidFire::LCBaseCombat_DoHitEntity_Hook(app::LCBaseCombat* __this,
+												  uint32_t targetID,
+												  app::AttackResult* attackResult,
+												  bool ignoreCheckCanBeHitInMP,
+												  MethodInfo* method)
 	{
 		auto attacker = game::Entity(__this->fields._._._entity);
 		RapidFire& rapidFire = RapidFire::GetInstance();
@@ -238,8 +254,9 @@ namespace cheat::feature
 		for (const auto& entity : validEntities) {
 			if (rapidFire.f_MultiHit) {
 				int attackCount = rapidFire.GetAttackCount(__this, entity->runtimeID(), attackResult);
-				for (int i = 0; i < attackCount; i++)
-					CALL_ORIGIN(LCBaseCombat_DoHitEntity_Hook, __this, entity->runtimeID(), attackResult, ignoreCheckCanBeHitInMP, method);
+				attackQueue.push({ __this, entity->runtimeID(), attackResult, ignoreCheckCanBeHitInMP, method, attackCount });
+				// for (int i = 0; i < attackCount; i++)
+				// 	CALL_ORIGIN(LCBaseCombat_DoHitEntity_Hook, __this, entity->runtimeID(), attackResult, ignoreCheckCanBeHitInMP, method);
 			} else CALL_ORIGIN(LCBaseCombat_DoHitEntity_Hook, __this, entity->runtimeID(), attackResult, ignoreCheckCanBeHitInMP, method);
 		}
 	}

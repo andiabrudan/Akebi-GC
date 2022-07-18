@@ -3,6 +3,8 @@
 #include <cheat-base/config/config.h>
 
 #include <il2cpp-appdata.h>
+#include <queue>
+#include <tuple>
 
 namespace cheat::feature 
 {
@@ -32,6 +34,11 @@ namespace cheat::feature
 	private:
 		RapidFire();
 		int CalcCountToKill(float attackDamage, uint32_t targetID);
+
+		static void LCBaseCombat_DoHitEntity_Hook(app::LCBaseCombat* __this, uint32_t targetID, app::AttackResult* attackResult, bool ignoreCheckCanBeHitInMP, MethodInfo* method);
+		void OnGameUpdate();
+
+		static std::queue<std::tuple<app::LCBaseCombat*, uint32_t, app::AttackResult*, bool, MethodInfo*, uint32_t>> attackQueue;
 	};
 }
 
